@@ -10,16 +10,13 @@ from langchain_community.vectorstores import FAISS
 # =========================
 # 🔑 CONFIGURATION
 # =========================
-# Get API key from secrets/env
 api_key = os.getenv("GROQ_API_KEY")
-
-# Hardcoding the model name to prevent "Variable Not Found" errors
 model_name = "llama3-8b-8192" 
 
 if not api_key:
-    raise ValueError("GROQ_API_KEY not found in environment variables/secrets")
+    raise ValueError("GROQ_API_KEY not found in environment variables")
 
-# Initialize the Groq client GLOBALLY so all functions can see it
+# Initialize client GLOBALLY
 client = Groq(api_key=api_key)
 
 # =========================
@@ -28,13 +25,12 @@ client = Groq(api_key=api_key)
 vector_db = None
 
 # =========================
-# 📄 PROCESS FILES FUNCTION
+# 📄 PROCESS FILES
 # =========================
 def process_files(files):
     global vector_db
-
     if not files:
-        return "⚠️ No files uploaded."
+        return "⚠️ Please upload at least one PDF."
 
     all_docs = []
     try:
@@ -43,32 +39,24 @@ def process_files(files):
             docs = loader.load()
             all_docs.extend(docs)
 
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=600,
-            chunk_overlap=100
-        )
-
+        splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
         split_docs = splitter.split_documents(all_docs)
 
-        # Using a lightweight embedding model
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2"
-        )
-
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         vector_db = FAISS.from_documents(split_docs, embeddings)
 
-        return f"✅ {len(files)} file(s) processed! You can now ask questions about them."
+        return f"✅ {len(files)} file(s) indexed! Ask me anything."
     except Exception as e:
-        return f"❌ Error processing files: {str(e)}"
+        return f"❌ Error: {str(e)}"
 
 # =========================
-# 🤖 CHAT FUNCTION (RAG + NORMAL)
+# 🤖 CHAT FUNCTION
 # =========================
 def chat_with_notes(message, history):
     global vector_db
     
     try:
-        # 🟢 MODE 1: Normal AI Chat (No documents uploaded)
+        # NORMAL CHAT (No docs)
         if vector_db is None:
             response = client.chat.completions.create(
                 messages=[{"role": "user", "content": message}],
@@ -76,34 +64,18 @@ def chat_with_notes(message, history):
                 temperature=0.7,
             )
             answer = response.choices[0].message.content
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": answer})
-            return history
+            return history + [[message, answer]]
 
-        # 🔵 MODE 2: RAG Mode (Search through notes)
+        # RAG CHAT
         retriever = vector_db.as_retriever(search_kwargs={"k": 3})
         docs = retriever.invoke(message)
-
         context = "\n\n".join([doc.page_content for doc in docs])
 
-        # Prepare source snippets for transparency
         sources = "\n\n--- SOURCES ---\n"
         for i, doc in enumerate(docs):
-            sources += f"\n[{i+1}] {doc.page_content[:200]}..."
+            sources += f"\n[{i+1}] {doc.page_content[:150]}..."
 
-        prompt = f"""
-You are an AI tutor. 
-Rules:
-- Use ONLY the provided notes to answer.
-- If the answer isn't in the notes, say "I couldn't find that in your notes."
-- Keep it simple and helpful.
-
-NOTES:
-{context}
-
-QUESTION:
-{message}
-"""
+        prompt = f"Use these notes to answer: {context}\n\nQuestion: {message}"
 
         response = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
@@ -112,49 +84,39 @@ QUESTION:
         )
 
         answer = response.choices[0].message.content
-        
-        # Add to history and return
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": answer + sources})
-        return history
+        return history + [[message, answer + sources]]
 
     except Exception as e:
-        # If something breaks, show the error in the chat
-        error_msg = f"❌ Error: {str(e)}"
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": error_msg})
-        return history
+        return history + [[message, f"❌ System Error: {str(e)}"]]
 
 # =========================
-# 🎨 UI LAYOUT (GRADIO)
+# 🎨 UI (GRADIO 6.0 COMPATIBLE)
 # =========================
-with gr.Blocks(theme=gr.themes.Soft()) as app:
-    gr.Markdown("# 📚 AI Notes Assistant")
-    gr.Markdown("Upload your PDF notes and chat with them using RAG + Groq.")
-
+# 1. Removed theme from here
+with gr.Blocks() as app:
+    gr.Markdown("# 📚 AI Notes Assistant (v6.0 Optimized)")
+    
     with gr.Row():
         with gr.Column(scale=1):
-            file_input = gr.File(file_count="multiple", label="Upload PDF Notes")
-            upload_btn = gr.Button("🚀 Process & Index Notes", variant="primary")
-            status = gr.Textbox(label="System Status", interactive=False)
+            file_input = gr.File(file_count="multiple", label="Upload PDFs")
+            upload_btn = gr.Button("Index Notes", variant="primary")
+            status = gr.Textbox(label="Status", interactive=False)
         
         with gr.Column(scale=2):
-            chatbot = gr.Chatbot(label="Study Chat", type="messages", height=500)
-            msg = gr.Textbox(placeholder="Ask a question about your notes...", label="Your Question")
+            # 2. Removed type="messages"
+            chatbot = gr.Chatbot(label="Chat History", height=450)
+            msg = gr.Textbox(placeholder="Type your question...")
             
             with gr.Row():
                 send = gr.Button("Send", variant="primary")
-                clear = gr.Button("Clear Chat")
+                clear = gr.Button("Clear")
 
-    # --- Button Logic ---
     upload_btn.click(process_files, inputs=file_input, outputs=status)
-
-    # Sending messages
+    
     send.click(chat_with_notes, inputs=[msg, chatbot], outputs=chatbot).then(lambda: "", None, msg)
     msg.submit(chat_with_notes, inputs=[msg, chatbot], outputs=chatbot).then(lambda: "", None, msg)
-
-    # Clearing history
     clear.click(lambda: [], None, chatbot)
 
+# 3. Theme is passed HERE now
 if __name__ == "__main__":
-    app.launch()
+    app.launch(theme=gr.themes.Soft())
