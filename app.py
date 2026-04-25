@@ -10,17 +10,18 @@ from langchain_community.vectorstores import FAISS
 # =========================
 # 🔑 ENV VARIABLES
 # =========================
+# =========================
+# 🔑 ENV VARIABLES
+# =========================
 api_key = os.getenv("GROQ_API_KEY")
-model_name = os.getenv("llama3-8b-8192")
+
+# Hardcode the model here instead of using os.getenv
+model_name = "llama3-8b-8192" 
 
 if not api_key:
     raise ValueError("GROQ_API_KEY not found in environment variables")
-
-if not model_name:
-    raise ValueError("GROQ_MODEL not found in environment variables")
-
-client = Groq(api_key=api_key)
-
+    
+# Notice we completely removed the check that was causing your error!
 # =========================
 # 🌍 VECTOR DB
 # =========================
