@@ -2,23 +2,28 @@ import gradio as gr
 import os
 from groq import Groq
 
+# ✅ Updated LangChain imports
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
-# =========================
-# 🔑 API KEY
-# =========================
-os.environ["GROQ_API_KEY"] = "YOUR_GROQ_API_KEY"
-client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 # =========================
-# 🌍 GLOBAL STORAGE
+# 🔑 API KEY (from HF Secrets)
+# =========================
+api_key = os.getenv("GROQ_API_KEY")
+if not api_key:
+    raise ValueError("GROQ_API_KEY not found. Add it in Hugging Face Secrets.")
+
+client = Groq(api_key=api_key)
+
+# =========================
+# 🌍 GLOBAL DB
 # =========================
 vector_db = None
 
 # =========================
-# 📄 PROCESS MULTIPLE PDFs
+# 📄 PROCESS FILES
 # =========================
 def process_files(files):
     global vector_db
@@ -27,32 +32,39 @@ def process_files(files):
 
     for file in files:
         loader = PyPDFLoader(file.name)
-        documents = loader.load()
-        all_docs.extend(documents)
+        docs = loader.load()
+        all_docs.extend(docs)
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=600,
         chunk_overlap=100
     )
 
-    docs = splitter.split_documents(all_docs)
+    split_docs = splitter.split_documents(all_docs)
 
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    vector_db = FAISS.from_documents(docs, embeddings)
+    vector_db = FAISS.from_documents(split_docs, embeddings)
 
-    return f"✅ {len(files)} file(s) processed successfully!"
+    return f"✅ {len(files)} file(s) processed!"
 
 # =========================
-# 🤖 RAG CHAT FUNCTION
+# 🤖 CHAT FUNCTION (FIXED)
 # =========================
 def chat_with_notes(message, history):
     global vector_db
 
+    if history is None:
+        history = []
+
     if vector_db is None:
-        return history + [[message, "⚠️ Please upload notes first."]]
+        history.append({
+            "role": "assistant",
+            "content": "⚠️ Please upload notes first."
+        })
+        return history
 
     retriever = vector_db.as_retriever(search_kwargs={"k": 3})
     docs = retriever.invoke(message)
@@ -64,12 +76,12 @@ def chat_with_notes(message, history):
         sources += f"\n[{i+1}] {doc.page_content[:200]}..."
 
     prompt = f"""
-You are an AI tutor helping a student.
+You are an AI tutor.
 
-STRICT RULES:
-- Answer ONLY using the notes
-- If answer is missing, say: "Not found in notes"
-- Keep answer simple and clear
+Rules:
+- Answer ONLY from notes
+- If not found, say: Not found in notes
+- Keep answer simple
 
 NOTES:
 {context}
@@ -88,32 +100,37 @@ ANSWER:
 
     answer = response.choices[0].message.content
 
-    final_answer = answer + sources
+    # ✅ New Gradio message format
+    history.append({"role": "user", "content": message})
+    history.append({"role": "assistant", "content": answer + sources})
 
-    history.append([message, final_answer])
     return history
 
 # =========================
-# 🎨 MODERN UI
+# 🎨 UI (FIXED FOR GRADIO 6)
 # =========================
-with gr.Blocks(theme=gr.themes.Soft()) as app:
-    gr.Markdown("## 📚 AI Notes Assistant (Advanced RAG)")
-    gr.Markdown("Upload notes and chat like ChatGPT!")
+with gr.Blocks() as app:
+    gr.Markdown("## 📚 AI Notes Assistant (RAG + Groq)")
+    gr.Markdown("Upload PDFs and chat with your notes")
 
     with gr.Row():
-        file_input = gr.File(file_count="multiple", label="Upload Notes (PDF)")
+        file_input = gr.File(file_count="multiple", label="Upload Notes")
         upload_btn = gr.Button("📤 Process Notes")
 
     status = gr.Textbox(label="Status")
 
     upload_btn.click(process_files, inputs=file_input, outputs=status)
 
-    chatbot = gr.Chatbot(height=400)
+    chatbot = gr.Chatbot(type="messages", height=400)
 
-    msg = gr.Textbox(placeholder="Ask anything from your notes...")
+    msg = gr.Textbox(placeholder="Ask your question...")
     send_btn = gr.Button("Send")
 
     send_btn.click(chat_with_notes, inputs=[msg, chatbot], outputs=chatbot)
     msg.submit(chat_with_notes, inputs=[msg, chatbot], outputs=chatbot)
 
-app.launch()
+    clear_btn = gr.Button("🗑️ Clear Chat")
+    clear_btn.click(lambda: [], None, chatbot)
+
+# ✅ Theme moved to launch (Gradio 6 fix)
+app.launch(theme=gr.themes.Soft())
