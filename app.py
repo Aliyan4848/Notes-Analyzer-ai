@@ -10,9 +10,6 @@ from langchain_community.vectorstores import FAISS
 # =========================
 # 🔑 ENV VARIABLES
 # =========================
-# =========================
-# 🔑 ENV VARIABLES
-# =========================
 api_key = os.getenv("GROQ_API_KEY")
 
 # Hardcode the model here instead of using os.getenv
@@ -58,57 +55,70 @@ def process_files(files):
 # =========================
 # 🤖 CHAT FUNCTION (RAG + NORMAL MODE)
 # =========================
+
+# =========================
+# 🤖 CHAT FUNCTION (STABLE VERSION)
+# =========================
 def chat_with_notes(message, history):
     global vector_db
+    
+    try:
+        # 🟢 If no documents → normal AI chat
+        if vector_db is None:
+            response = client.chat.completions.create(
+                messages=[{"role": "user", "content": message}],
+                model=model_name,
+                temperature=0.7,
+            )
+            answer = response.choices[0].message.content
+            # Append the new message to history
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": answer})
+            return history
 
-    # 🟢 If no documents → normal AI chat
-    if vector_db is None:
+        # 🔵 RAG MODE
+        retriever = vector_db.as_retriever(search_kwargs={"k": 3})
+        docs = retriever.invoke(message)
+
+        context = "\n\n".join([doc.page_content for doc in docs])
+
+        sources = "\n\n--- SOURCES ---\n"
+        for i, doc in enumerate(docs):
+            sources += f"\n[{i+1}] {doc.page_content[:200]}..."
+
+        prompt = f"""
+        You are an AI tutor.
+        Rules:
+        - Use ONLY the given notes
+        - If answer not found, say "Not found in notes"
+        - Keep answer simple
+
+        NOTES:
+        {context}
+
+        QUESTION:
+        {message}
+        """
+
         response = client.chat.completions.create(
-            messages=[{"role": "user", "content": message}],
+            messages=[{"role": "user", "content": prompt}],
             model=model_name,
-            temperature=0.7,
+            temperature=0.3,
         )
 
         answer = response.choices[0].message.content
-        return history + [[message, answer]]
+        
+        # Append to history using the modern dictionary format
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": answer + sources})
+        return history
 
-    # 🔵 RAG MODE
-    retriever = vector_db.as_retriever(search_kwargs={"k": 3})
-    docs = retriever.invoke(message)
-
-    context = "\n\n".join([doc.page_content for doc in docs])
-
-    sources = "\n\n--- SOURCES ---\n"
-    for i, doc in enumerate(docs):
-        sources += f"\n[{i+1}] {doc.page_content[:200]}..."
-
-    prompt = f"""
-You are an AI tutor.
-
-Rules:
-- Use ONLY the given notes
-- If answer not found, say "Not found in notes"
-- Keep answer simple
-
-NOTES:
-{context}
-
-QUESTION:
-{message}
-
-ANSWER:
-"""
-
-    response = client.chat.completions.create(
-        messages=[{"role": "user", "content": prompt}],
-        model=model_name,
-        temperature=0.3,
-    )
-
-    answer = response.choices[0].message.content
-
-    return history + [[message, answer + sources]]
-
+    except Exception as e:
+        # This will show the actual error message in the chatbot UI
+        error_msg = f"❌ Error: {str(e)}"
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": error_msg})
+        return history
 # =========================
 # 🎨 UI (GRADIO SAFE)
 # =========================
