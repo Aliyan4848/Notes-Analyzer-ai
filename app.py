@@ -55,7 +55,7 @@ def chat_with_notes(message, history):
         return history + [[message, "⚠️ Please upload notes first."]]
 
     retriever = vector_db.as_retriever(search_kwargs={"k": 3})
-    docs = retriever.get_relevant_documents(message)
+    docs = retriever.invoke(message)
 
     context = "\n\n".join([doc.page_content for doc in docs])
 
