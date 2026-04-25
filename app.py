@@ -101,10 +101,9 @@ ANSWER:
     answer = response.choices[0].message.content
 
     # ✅ New Gradio message format
-    history.append({"role": "user", "content": message})
-    history.append({"role": "assistant", "content": answer + sources})
-
-    return history
+ history.append([message, answer + sources])
+return history
+    
 
 # =========================
 # 🎨 UI (FIXED FOR GRADIO 6)
@@ -121,8 +120,8 @@ with gr.Blocks() as app:
 
     upload_btn.click(process_files, inputs=file_input, outputs=status)
 
-    chatbot = gr.Chatbot(type="messages", height=400)
-
+    chatbot = gr.Chatbot(height=400)
+    
     msg = gr.Textbox(placeholder="Ask your question...")
     send_btn = gr.Button("Send")
 
