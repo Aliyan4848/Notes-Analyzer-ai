@@ -2,23 +2,27 @@ import gradio as gr
 import os
 from groq import Groq
 
-# ✅ Updated LangChain imports
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 # =========================
-# 🔑 API KEY (from HF Secrets)
+# 🔑 ENV VARIABLES
 # =========================
 api_key = os.getenv("GROQ_API_KEY")
+model_name = os.getenv("GROQ_MODEL")
+
 if not api_key:
-    raise ValueError("GROQ_API_KEY not found. Add it in Hugging Face Secrets.")
+    raise ValueError("GROQ_API_KEY not found in environment variables")
+
+if not model_name:
+    raise ValueError("GROQ_MODEL not found in environment variables")
 
 client = Groq(api_key=api_key)
 
 # =========================
-# 🌍 GLOBAL DB
+# 🌍 VECTOR DB
 # =========================
 vector_db = None
 
@@ -48,17 +52,26 @@ def process_files(files):
 
     vector_db = FAISS.from_documents(split_docs, embeddings)
 
-    return f"✅ {len(files)} file(s) processed!"
+    return f"✅ {len(files)} file(s) processed successfully!"
 
 # =========================
-# 🤖 CHAT FUNCTION (FIXED)
+# 🤖 CHAT FUNCTION (RAG + NORMAL MODE)
 # =========================
 def chat_with_notes(message, history):
     global vector_db
 
+    # 🟢 If no documents → normal AI chat
     if vector_db is None:
-        return history + [[message, "⚠️ Please upload notes first."]]
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": message}],
+            model=model_name,
+            temperature=0.7,
+        )
 
+        answer = response.choices[0].message.content
+        return history + [[message, answer]]
+
+    # 🔵 RAG MODE
     retriever = vector_db.as_retriever(search_kwargs={"k": 3})
     docs = retriever.invoke(message)
 
@@ -71,8 +84,10 @@ def chat_with_notes(message, history):
     prompt = f"""
 You are an AI tutor.
 
-Answer ONLY from notes.
-If not found, say: Not found in notes.
+Rules:
+- Use ONLY the given notes
+- If answer not found, say "Not found in notes"
+- Keep answer simple
 
 NOTES:
 {context}
@@ -85,40 +100,38 @@ ANSWER:
 
     response = client.chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
-        model="llama3-8b-8192",
+        model=model_name,
         temperature=0.3,
     )
 
     answer = response.choices[0].message.content
 
-    history.append([message, answer + sources])
-    return history
+    return history + [[message, answer + sources]]
 
 # =========================
-# 🎨 UI (FIXED FOR GRADIO 6)
+# 🎨 UI (GRADIO SAFE)
 # =========================
 with gr.Blocks() as app:
     gr.Markdown("## 📚 AI Notes Assistant (RAG + Groq)")
-    gr.Markdown("Upload PDFs and chat with your notes")
+    gr.Markdown("Upload notes OR chat normally")
 
     with gr.Row():
-        file_input = gr.File(file_count="multiple", label="Upload Notes")
-        upload_btn = gr.Button("📤 Process Notes")
+        file_input = gr.File(file_count="multiple", label="Upload PDFs")
+        upload_btn = gr.Button("Process Notes")
 
     status = gr.Textbox(label="Status")
 
     upload_btn.click(process_files, inputs=file_input, outputs=status)
 
     chatbot = gr.Chatbot(height=400)
-    
-    msg = gr.Textbox(placeholder="Ask your question...")
-    send_btn = gr.Button("Send")
 
-    send_btn.click(chat_with_notes, inputs=[msg, chatbot], outputs=chatbot)
+    msg = gr.Textbox(placeholder="Ask something...")
+    send = gr.Button("Send")
+
+    send.click(chat_with_notes, inputs=[msg, chatbot], outputs=chatbot)
     msg.submit(chat_with_notes, inputs=[msg, chatbot], outputs=chatbot)
 
-    clear_btn = gr.Button("🗑️ Clear Chat")
-    clear_btn.click(lambda: [], None, chatbot)
+    clear = gr.Button("Clear Chat")
+    clear.click(lambda: [], None, chatbot)
 
-# ✅ Theme moved to launch (Gradio 6 fix)
-app.launch(theme=gr.themes.Soft())
+app.launch()
