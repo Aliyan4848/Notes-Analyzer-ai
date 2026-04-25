@@ -11,7 +11,7 @@ from langchain_community.vectorstores import FAISS
 # 🔑 ENV VARIABLES
 # =========================
 api_key = os.getenv("GROQ_API_KEY")
-model_name = os.getenv("GROQ_MODEL")
+model_name = os.getenv("llama3-8b-8192")
 
 if not api_key:
     raise ValueError("GROQ_API_KEY not found in environment variables")
