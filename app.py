@@ -56,15 +56,8 @@ def process_files(files):
 def chat_with_notes(message, history):
     global vector_db
 
-    if history is None:
-        history = []
-
     if vector_db is None:
-        history.append({
-            "role": "assistant",
-            "content": "⚠️ Please upload notes first."
-        })
-        return history
+        return history + [[message, "⚠️ Please upload notes first."]]
 
     retriever = vector_db.as_retriever(search_kwargs={"k": 3})
     docs = retriever.invoke(message)
@@ -78,10 +71,8 @@ def chat_with_notes(message, history):
     prompt = f"""
 You are an AI tutor.
 
-Rules:
-- Answer ONLY from notes
-- If not found, say: Not found in notes
-- Keep answer simple
+Answer ONLY from notes.
+If not found, say: Not found in notes.
 
 NOTES:
 {context}
@@ -100,10 +91,8 @@ ANSWER:
 
     answer = response.choices[0].message.content
 
-    # ✅ New Gradio message format
- history.append([message, answer + sources])
-return history
-    
+    history.append([message, answer + sources])
+    return history
 
 # =========================
 # 🎨 UI (FIXED FOR GRADIO 6)
