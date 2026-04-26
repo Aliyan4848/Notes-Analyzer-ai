@@ -1,8 +1,4 @@
 gradio
 groq
-langchain
-langchain-community
-langchain-text-splitters
-pypdf
-sentence-transformers
-faiss-cpu
+PyPDF2
+python-docx
