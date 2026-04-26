@@ -3,12 +3,12 @@ import gradio as gr
 import PyPDF2
 from docx import Document
 from groq import Groq
-from datetime import datetime
 from typing import List, Tuple, Optional
 
-# Initialize Groq client
-# Note: Ensure GROQ_API_KEY is set in your environment variables
-client = Groq()
+# Initialize Groq client using the Hugging Face Secret/Env Variable
+# Make sure you added GROQ_API_KEY in your Space Settings!
+api_key = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=api_key)
 
 class DocumentProcessor:
     @staticmethod
@@ -37,34 +37,34 @@ class RAGProcessor:
         self.documents = {}
 
     def add_document(self, doc_name: str, content: str):
+        # Chunking text into manageable pieces
         words = content.split()
         chunks = [" ".join(words[i:i + 500]) for i in range(0, len(words), 450)]
         self.documents[doc_name] = {'chunks': chunks}
 
     def answer_question(self, question: str) -> str:
         if not self.documents:
-            return "No documents uploaded. Please upload educational notes first."
+            return "⚠️ No documents found. Please upload your notes in the 'Upload' tab first."
         
-        # Simple retrieval: Combine first chunks for context
+        # Combine chunks for context (Simplified retrieval)
         all_context = ""
         for doc in self.documents.values():
-            all_context += "\n".join(doc['chunks'][:3])
+            all_context += "\n".join(doc['chunks'][:5]) # Using top chunks
 
         try:
-            # Fixed Groq API call syntax
             chat_completion = client.chat.completions.create(
                 model="mixtral-8x7b-32768",
                 messages=[
-                    {"role": "system", "content": "Answer based on the provided notes context."},
-                    {"role": "user", "content": f"Context: {all_context[:5000]}\n\nQuestion: {question}"}
+                    {"role": "system", "content": "You are a helpful educational assistant. Answer based ONLY on the provided context."},
+                    {"role": "user", "content": f"Context: {all_context[:6000]}\n\nQuestion: {question}"}
                 ],
                 max_tokens=1024
             )
             return chat_completion.choices[0].message.content
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"❌ Error: {str(e)}"
 
-# --- Gradio UI Logic ---
+# --- UI Functions ---
 
 def handle_upload(files, state_processor):
     if not files:
@@ -75,38 +75,43 @@ def handle_upload(files, state_processor):
         text, _ = dp.process_file(file.name)
         state_processor.add_document(os.path.basename(file.name), text)
     
-    return f"Successfully uploaded {len(files)} file(s).", state_processor
+    return f"✅ Successfully processed {len(files)} file(s). You can now ask questions!", state_processor
 
 def handle_query(question, state_processor):
     return state_processor.answer_question(question)
 
-with gr.Blocks() as demo:
-    # This keeps the RAGProcessor alive for the duration of the user's session
+# --- Gradio Interface ---
+
+with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    # Keeps the data persistent for the user session
     session_rag = gr.State(RAGProcessor())
     
-    gr.Markdown("# 🎓 Educational RAG AI")
+    gr.Markdown("# 🎓 AI Study Assistant (RAG)")
+    gr.Markdown("Upload your university notes and get instant answers.")
     
-    with gr.Tab("1. Upload Notes"):
-        file_input = gr.File(label="Upload PDF, DOCX, or TXT", file_count="multiple")
-        upload_btn = gr.Button("Process Documents")
-        status_out = gr.Textbox(label="Status")
-        
-        upload_btn.click(
-            handle_upload, 
-            inputs=[file_input, session_rag], 
-            outputs=[status_out, session_rag]
-        )
-        
-    with gr.Tab("2. Q&A"):
-        ques_input = gr.Textbox(label="Your Question")
-        ans_output = gr.Textbox(label="AI Response")
-        ask_btn = gr.Button("Ask")
-        
-        ask_btn.click(
-            handle_query, 
-            inputs=[ques_input, session_rag], 
-            outputs=ans_output
-        )
+    with gr.Tabs():
+        with gr.TabItem("1. Upload Notes"):
+            file_input = gr.File(label="Upload PDFs, Docs, or TXT", file_count="multiple")
+            upload_btn = gr.Button("Process Documents", variant="primary")
+            status_out = gr.Textbox(label="Status")
+            
+            upload_btn.click(
+                handle_upload, 
+                inputs=[file_input, session_rag], 
+                outputs=[status_out, session_rag]
+            )
+            
+        with gr.TabItem("2. Ask Questions"):
+            ques_input = gr.Textbox(label="Enter your question", placeholder="What is the main topic of these notes?")
+            ans_output = gr.Markdown(label="Response")
+            ask_btn = gr.Button("Search Notes", variant="primary")
+            
+            ask_btn.click(
+                handle_query, 
+                inputs=[ques_input, session_rag], 
+                outputs=ans_output
+            )
 
 if __name__ == "__main__":
-    demo.launch()
+    # Disable SSR for Python 3.13 compatibility and enable queue for Hugging Face
+    demo.queue().launch(ssr_mode=False)
