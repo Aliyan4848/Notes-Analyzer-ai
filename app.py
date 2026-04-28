@@ -51,7 +51,7 @@ class RAGProcessor:
 
         try:
             chat_completion = client.chat.completions.create(
-                model="mixtral-8x7b-32768",
+             model="llama-3.3-70b-versatile",
                 messages=[
                     {"role": "system", "content": "You are a helpful educational assistant. Answer based ONLY on the provided context."},
                     {"role": "user", "content": f"Context: {all_context[:6000]}\n\nQuestion: {question}"}
